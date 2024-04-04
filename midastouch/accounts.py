@@ -143,6 +143,11 @@ class DebitAccount:
             raise FileNotFoundError(
                 f"Debit account '{name}' does not exist. Use create=True to create it."
             )
+        if create and db_path.exists():
+            raise FileExistsError(
+                f"Debit account '{name}' already exists. Use create=False (default) to access it or choose a different name."
+            )
+
         self.engine = create_engine(f"sqlite:///{db_path}")
         Base.metadata.create_all(self.engine)
         self.session = Session(self.engine)
@@ -556,6 +561,10 @@ class CreditAccount:
             raise FileNotFoundError(
                 f"Credit account '{name}' does not exist. Use create=True to create it."
             )
+        if create and db_path.exists():
+            raise FileExistsError(
+                f"Credit account '{name}' already exists. Use create=False (default) to access it or choose a different name."
+            )
         self.engine = create_engine(f"sqlite:///{db_path}")
         Base.metadata.create_all(self.engine)
         self.session = Session(self.engine)
@@ -919,10 +928,36 @@ class CreditAccount:
 
 
 def main() -> None:
-    gc = DebitAccount("test", create=True)
+    # Create a debit account. Use create=True to create a new account.
+    # and remove create argument (or set to False) to access an existing account.
+    example_account = DebitAccount("example", create=False)
 
-    # check validity of transactions
-    print(gc.check_validity())
+    # Add transaction data from a CSV file. If data is already in the database, it will not be added again.
+    example_account.add_data("data/example.csv")
+
+    # Check if the transactions in the database are valid
+    print(f"Validity check passed: {example_account.check_validity()}")
+
+    # Get sum of all withdrawals in february 2023
+    date_start = datetime(2023, 2, 1)
+    date_end = datetime(2023, 2, 28)
+    sum_withdrawals = example_account.sum_transactions(
+        deposits=False, withdrawals=True, date_start=date_start, date_end=date_end
+    )
+    print(f"Sum of all withdrawals in February 2023: {sum_withdrawals}")
+
+    # Get average deposit amount
+    average_deposit = example_account.average_transactions(
+        deposits=True, withdrawals=False
+    )
+    print(f"Average deposit amount: {average_deposit}")
+
+    # Get number of transactions with the string "13" in the description
+    count_transactions = example_account.count_transactions(description_contains="13")
+    print(f"Number of transactions with '13' in the description: {count_transactions}")
+
+    # Get all transactions
+    transactions = example_account.get_transactions()
 
 
 if __name__ == "__main__":
