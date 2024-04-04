@@ -1,5 +1,7 @@
 **.csv
 *.venv
 *.lock
+**.py
 
 !data/example.csv
+!midastouch/*.py
