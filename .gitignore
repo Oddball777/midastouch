@@ -2,6 +2,7 @@
 *.venv
 *.lock
 **.py
+**.pyc
 
 !data/example.csv
 !midastouch/*.py

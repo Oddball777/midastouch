@@ -2,10 +2,11 @@ import hashlib
 import os
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 from platformdirs import user_data_dir
-from sqlalchemy import DateTime, Float, String, create_engine, func
+from sqlalchemy import DateTime, Float, String, create_engine, func, or_
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 
@@ -198,7 +199,14 @@ class DebitAccount:
         else:
             print(f"{name} was not deleted")
 
-    def _add_transaction(self, description, date, deposit, withdrawal, balance):
+    def _add_transaction(
+        self,
+        description: str,
+        date: datetime,
+        deposit: Optional[float],
+        withdrawal: Optional[float],
+        balance: float,
+    ):
         """
         Add a transaction to the database.
 
@@ -215,7 +223,13 @@ class DebitAccount:
         balance : float
             The balance after the transaction.
         """
-        id = generate_hash_id(description, date, deposit, withdrawal, balance)
+        id = generate_hash_id(
+            description=description,
+            date=date,
+            deposit=deposit,
+            withdrawal=withdrawal,
+            balance=balance,
+        )
         if self.session.query(DebitTransaction).filter_by(id=id).first() is not None:
             return
         transaction = DebitTransaction(
@@ -317,11 +331,11 @@ class DebitAccount:
 
     def get_transactions(
         self,
-        deposits=True,
-        withdrawals=True,
-        date_start=None,
-        date_end=None,
-        description_contains=None,
+        deposits: bool = True,
+        withdrawals: bool = True,
+        date_start: Optional[datetime | str] = None,
+        date_end: Optional[datetime | str] = None,
+        description_contains: Optional[str | list[str]] = None,
     ):
         """
         Get all transactions in the database.
@@ -332,11 +346,11 @@ class DebitAccount:
             Whether to include deposits in the results.
         withdrawals : bool, optional
             Whether to include withdrawals in the results.
-        date_start : datetime, optional
+        date_start : datetime or str, optional
             The start date to filter transactions.
-        date_end : datetime, optional
+        date_end : datetime or str, optional
             The end date to filter transactions.
-        description_contains : str, optional
+        description_contains : str | list[str], optional
             A string to search for in the transaction descriptions.
 
         Returns
@@ -344,6 +358,10 @@ class DebitAccount:
         list[Transaction]
             A list of all transactions in the database that match the criteria.
         """
+        if isinstance(date_start, str):
+            date_start = datetime.fromisoformat(date_start)
+        if isinstance(date_end, str):
+            date_end = datetime.fromisoformat(date_end)
         query = self.session.query(DebitTransaction)
         if not deposits:
             query = query.filter(DebitTransaction.deposit.is_(None))
@@ -354,9 +372,19 @@ class DebitAccount:
         if date_end is not None:
             query = query.filter(DebitTransaction.date <= date_end)
         if description_contains is not None:
-            query = query.filter(
-                DebitTransaction.description.contains(description_contains)
-            )
+            if isinstance(description_contains, str):
+                query = query.filter(
+                    DebitTransaction.description.contains(description_contains)
+                )
+            elif isinstance(description_contains, list):
+                query = query.filter(
+                    or_(
+                        *[
+                            DebitTransaction.description.contains(keyword)
+                            for keyword in description_contains
+                        ]
+                    )
+                )
         query = query.order_by(DebitTransaction.date)
         return query.all()
 
@@ -376,11 +404,11 @@ class DebitAccount:
 
     def count_transactions(
         self,
-        deposits=True,
-        withdrawals=True,
-        date_start=None,
-        date_end=None,
-        description_contains=None,
+        deposits: bool = True,
+        withdrawals: bool = True,
+        date_start: Optional[datetime | str] = None,
+        date_end: Optional[datetime | str] = None,
+        description_contains: Optional[str | list[str]] = None,
     ) -> int:
         """
         Get the number of transactions in the database.
@@ -391,11 +419,11 @@ class DebitAccount:
             Whether to include deposits in the count.
         withdrawals : bool, optional
             Whether to include withdrawals in the count.
-        date_start : datetime, optional
+        date_start : datetime or str, optional
             The start date to filter transactions.
-        date_end : datetime, optional
+        date_end : datetime or str, optional
             The end date to filter transactions.
-        description_contains : str, optional
+        description_contains : str or list[str], optional
             A string to search for in the transaction descriptions.
 
         Returns
@@ -403,6 +431,10 @@ class DebitAccount:
         int
             The number of transactions in the database that match the criteria.
         """
+        if isinstance(date_start, str):
+            date_start = datetime.fromisoformat(date_start)
+        if isinstance(date_end, str):
+            date_end = datetime.fromisoformat(date_end)
         query = self.session.query(func.count(DebitTransaction.id))
         if not deposits:
             query = query.filter(DebitTransaction.deposit.is_(None))
@@ -413,18 +445,28 @@ class DebitAccount:
         if date_end is not None:
             query = query.filter(DebitTransaction.date <= date_end)
         if description_contains is not None:
-            query = query.filter(
-                DebitTransaction.description.contains(description_contains)
-            )
+            if isinstance(description_contains, str):
+                query = query.filter(
+                    DebitTransaction.description.contains(description_contains)
+                )
+            elif isinstance(description_contains, list):
+                query = query.filter(
+                    or_(
+                        *[
+                            DebitTransaction.description.contains(keyword)
+                            for keyword in description_contains
+                        ]
+                    )
+                )
         return query.scalar()
 
     def sum_transactions(
         self,
-        deposits=True,
-        withdrawals=True,
-        date_start=None,
-        date_end=None,
-        description_contains=None,
+        deposits: bool = True,
+        withdrawals: bool = True,
+        date_start: Optional[datetime | str] = None,
+        date_end: Optional[datetime | str] = None,
+        description_contains: Optional[str | list[str]] = None,
     ):
         """
         Get the sum of all transactions which match the specified criteria.
@@ -435,11 +477,11 @@ class DebitAccount:
             Whether to include deposits in the sum.
         withdrawals : bool, optional
             Whether to include withdrawals in the sum.
-        date_start : datetime, optional
+        date_start : datetime or str, optional
             The start date to filter transactions.
-        date_end : datetime, optional
+        date_end : datetime or str, optional
             The end date to filter transactions.
-        description_contains : str, optional
+        description_contains : str or list[str], optional
             A string to search for in the transaction descriptions.
 
         Returns
@@ -447,6 +489,10 @@ class DebitAccount:
         float
             The sum of all transactions that contain the specified string.
         """
+        if isinstance(date_start, str):
+            date_start = datetime.fromisoformat(date_start)
+        if isinstance(date_end, str):
+            date_end = datetime.fromisoformat(date_end)
         query = self.session.query(
             func.sum(DebitTransaction.deposit), func.sum(DebitTransaction.withdrawal)
         )
@@ -459,19 +505,30 @@ class DebitAccount:
         if date_end is not None:
             query = query.filter(DebitTransaction.date <= date_end)
         if description_contains is not None:
-            query = query.filter(
-                DebitTransaction.description.contains(description_contains)
-            )
+            if isinstance(description_contains, str):
+                query = query.filter(
+                    DebitTransaction.description.contains(description_contains)
+                )
+            elif isinstance(description_contains, list):
+                query = query.filter(
+                    or_(
+                        *[
+                            DebitTransaction.description.contains(keyword)
+                            for keyword in description_contains
+                        ]
+                    )
+                )
+
         deposit, withdrawal = query.one()
         return round((deposit or 0) - (withdrawal or 0), 2)
 
     def average_transactions(
         self,
-        deposits=True,
-        withdrawals=True,
-        date_start=None,
-        date_end=None,
-        description_contains=None,
+        deposits: bool = True,
+        withdrawals: bool = True,
+        date_start: Optional[datetime | str] = None,
+        date_end: Optional[datetime | str] = None,
+        description_contains: Optional[str | list[str]] = None,
     ):
         """
         Get the average of all transactions which match the specified criteria.
@@ -482,11 +539,11 @@ class DebitAccount:
             Whether to include deposits in the average.
         withdrawals : bool, optional
             Whether to include withdrawals in the average.
-        date_start : datetime, optional
+        date_start : datetime or str, optional
             The start date to filter transactions.
-        date_end : datetime, optional
+        date_end : datetime or str, optional
             The end date to filter transactions.
-        description_contains : str, optional
+        description_contains : str or list[str], optional
             A string to search for in the transaction descriptions.
 
         Returns
@@ -494,6 +551,10 @@ class DebitAccount:
         float
             The average value of all transactions that match the criteria.
         """
+        if isinstance(date_start, str):
+            date_start = datetime.fromisoformat(date_start)
+        if isinstance(date_end, str):
+            date_end = datetime.fromisoformat(date_end)
         if (
             self.count_transactions(
                 deposits, withdrawals, date_start, date_end, description_contains
@@ -611,7 +672,14 @@ class CreditAccount:
         else:
             print(f"{name} was not deleted")
 
-    def _add_transaction(self, description, date, charge, payment, balance):
+    def _add_transaction(
+        self,
+        description: str,
+        date: datetime,
+        charge: Optional[float],
+        payment: Optional[float],
+        balance: float,
+    ):
         """
         Add a transaction to the database.
 
@@ -628,7 +696,13 @@ class CreditAccount:
         balance : float
             The balance after the transaction.
         """
-        id = generate_hash_id(description, date, charge, payment, balance)
+        id = generate_hash_id(
+            description=description,
+            date=date,
+            deposit=charge,
+            withdrawal=payment,
+            balance=balance,
+        )
         if self.session.query(CreditTransaction).filter_by(id=id).first() is not None:
             return
         transaction = CreditTransaction(
@@ -650,7 +724,7 @@ class CreditAccount:
         ----------
         file_path : str
             The path to the CSV file. The file must have columns, in order (no header):
-            - date: datetime
+            - date (and optionally time): str (format: "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD")
             - description: str
             - charge: float
             - payment: float
@@ -667,7 +741,7 @@ class CreditAccount:
         ----------
         file_path : str
             The path to the CSV file. The file must have columns, in order (no header):
-            - date: datetime
+            - date (and optionally time): str (format: "YYYY-MM-DD HH:MM:SS" or "YYYY-MM-DD")
             - description: str
             - charge: float
             - payment: float
@@ -712,11 +786,11 @@ class CreditAccount:
 
     def get_transactions(
         self,
-        charges=True,
-        payments=True,
-        date_start=None,
-        date_end=None,
-        description_contains=None,
+        charges: bool = True,
+        payments: bool = True,
+        date_start: Optional[datetime | str] = None,
+        date_end: Optional[datetime | str] = None,
+        description_contains: Optional[str | list[str]] = None,
     ):
         """
         Get all transactions in the database.
@@ -727,11 +801,11 @@ class CreditAccount:
             Whether to include charges in the results.
         payments : bool, optional
             Whether to include payments in the results.
-        date_start : datetime, optional
+        date_start : datetime or str, optional
             The start date to filter transactions.
-        date_end : datetime, optional
+        date_end : datetime or str, optional
             The end date to filter transactions.
-        description_contains : str, optional
+        description_contains : str or list[str], optional
             A string to search for in the transaction descriptions.
 
         Returns
@@ -739,6 +813,10 @@ class CreditAccount:
         list[Transaction]
             A list of all transactions in the database that match the criteria.
         """
+        if isinstance(date_start, str):
+            date_start = datetime.fromisoformat(date_start)
+        if isinstance(date_end, str):
+            date_end = datetime.fromisoformat(date_end)
         query = self.session.query(CreditTransaction)
         if not charges:
             query = query.filter(CreditTransaction.charge.is_(None))
@@ -749,9 +827,19 @@ class CreditAccount:
         if date_end is not None:
             query = query.filter(CreditTransaction.date <= date_end)
         if description_contains is not None:
-            query = query.filter(
-                CreditTransaction.description.contains(description_contains)
-            )
+            if isinstance(description_contains, str):
+                query = query.filter(
+                    CreditTransaction.description.contains(description_contains)
+                )
+            elif isinstance(description_contains, list):
+                query = query.filter(
+                    or_(
+                        *[
+                            CreditTransaction.description.contains(keyword)
+                            for keyword in description_contains
+                        ]
+                    )
+                )
         query = query.order_by(CreditTransaction.date)
         return query.all()
 
@@ -771,11 +859,11 @@ class CreditAccount:
 
     def count_transactions(
         self,
-        charges=True,
-        payments=True,
-        date_start=None,
-        date_end=None,
-        description_contains=None,
+        charges: bool = True,
+        payments: bool = True,
+        date_start: Optional[datetime | str] = None,
+        date_end: Optional[datetime | str] = None,
+        description_contains: Optional[str | list[str]] = None,
     ) -> int:
         """
         Get the number of transactions in the database.
@@ -786,11 +874,11 @@ class CreditAccount:
             Whether to include charges in the count.
         payments : bool, optional
             Whether to include payments in the count.
-        date_start : datetime, optional
+        date_start : datetime or str, optional
             The start date to filter transactions.
-        date_end : datetime, optional
+        date_end : datetime or str, optional
             The end date to filter transactions.
-        description_contains : str, optional
+        description_contains : str or list[str], optional
             A string to search for in the transaction descriptions.
 
         Returns
@@ -798,6 +886,10 @@ class CreditAccount:
         int
             The number of transactions in the database that match the criteria.
         """
+        if isinstance(date_start, str):
+            date_start = datetime.fromisoformat(date_start)
+        if isinstance(date_end, str):
+            date_end = datetime.fromisoformat(date_end)
         query = self.session.query(func.count(CreditTransaction.id))
         if not charges:
             query = query.filter(CreditTransaction.charge.is_(None))
@@ -808,18 +900,29 @@ class CreditAccount:
         if date_end is not None:
             query = query.filter(CreditTransaction.date <= date_end)
         if description_contains is not None:
-            query = query.filter(
-                CreditTransaction.description.contains(description_contains)
-            )
+            if isinstance(description_contains, str):
+                query = query.filter(
+                    CreditTransaction.description.contains(description_contains)
+                )
+            elif isinstance(description_contains, list):
+                query = query.filter(
+                    or_(
+                        *[
+                            CreditTransaction.description.contains(keyword)
+                            for keyword in description_contains
+                        ]
+                    )
+                )
+
         return query.scalar()
 
     def sum_transactions(
         self,
-        charges=True,
-        payments=True,
-        date_start=None,
-        date_end=None,
-        description_contains=None,
+        charges: bool = True,
+        payments: bool = True,
+        date_start: Optional[datetime | str] = None,
+        date_end: Optional[datetime | str] = None,
+        description_contains: Optional[str | list[str]] = None,
     ):
         """
         Get the sum of all transactions which match the specified criteria.
@@ -830,11 +933,11 @@ class CreditAccount:
             Whether to include charges in the sum.
         payments : bool, optional
             Whether to include payments in the sum.
-        date_start : datetime, optional
+        date_start : datetime or str, optional
             The start date to filter transactions.
-        date_end : datetime, optional
+        date_end : datetime or str, optional
             The end date to filter transactions.
-        description_contains : str, optional
+        description_contains : str or list[str], optional
             A string to search for in the transaction descriptions.
 
         Returns
@@ -842,6 +945,10 @@ class CreditAccount:
         float
             The sum of all transactions that contain the specified string.
         """
+        if isinstance(date_start, str):
+            date_start = datetime.fromisoformat(date_start)
+        if isinstance(date_end, str):
+            date_end = datetime.fromisoformat(date_end)
         query = self.session.query(
             func.sum(CreditTransaction.charge), func.sum(CreditTransaction.payment)
         )
@@ -854,19 +961,29 @@ class CreditAccount:
         if date_end is not None:
             query = query.filter(CreditTransaction.date <= date_end)
         if description_contains is not None:
-            query = query.filter(
-                CreditTransaction.description.contains(description_contains)
-            )
+            if isinstance(description_contains, str):
+                query = query.filter(
+                    CreditTransaction.description.contains(description_contains)
+                )
+            elif isinstance(description_contains, list):
+                query = query.filter(
+                    or_(
+                        *[
+                            CreditTransaction.description.contains(keyword)
+                            for keyword in description_contains
+                        ]
+                    )
+                )
         charge, payment = query.one()
         return (charge or 0) - (payment or 0)
 
     def average_transactions(
         self,
-        charges=True,
-        payments=True,
-        date_start=None,
-        date_end=None,
-        description_contains=None,
+        charges: bool = True,
+        payments: bool = True,
+        date_start: Optional[datetime | str] = None,
+        date_end: Optional[datetime | str] = None,
+        description_contains: Optional[str | list[str]] = None,
     ):
         """
         Get the average of all transactions which match the specified criteria.
@@ -877,11 +994,11 @@ class CreditAccount:
             Whether to include charges in the average.
         payments : bool, optional
             Whether to include payments in the average.
-        date_start : datetime, optional
+        date_start : datetime or str, optional
             The start date to filter transactions.
-        date_end : datetime, optional
-        The end date to filter transactions.
-        description_contains : str, optional
+        date_end : datetime or str, optional
+            The end date to filter transactions.
+        description_contains : str or list[str], optional
             A string to search for in the transaction descriptions.
 
         Returns
@@ -889,6 +1006,10 @@ class CreditAccount:
         float
             The average value of all transactions that match the criteria.
         """
+        if isinstance(date_start, str):
+            date_start = datetime.fromisoformat(date_start)
+        if isinstance(date_end, str):
+            date_end = datetime.fromisoformat(date_end)
         total = self.sum_transactions(
             charges, payments, date_start, date_end, description_contains
         )
@@ -939,10 +1060,8 @@ def main() -> None:
     print(f"Validity check passed: {example_account.check_validity()}")
 
     # Get sum of all withdrawals in february 2023
-    date_start = datetime(2023, 2, 1)
-    date_end = datetime(2023, 2, 28)
     sum_withdrawals = example_account.sum_transactions(
-        deposits=False, withdrawals=True, date_start=date_start, date_end=date_end
+        deposits=False, withdrawals=True, date_start="2023-02-01", date_end="2023-02-28"
     )
     print(f"Sum of all withdrawals in February 2023: {sum_withdrawals}")
 
