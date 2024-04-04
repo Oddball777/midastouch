@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "midastouch"
+version = "1.0.0"
+description = "A simple library package designed to parse, validate, categorize, and analyze transaction data from bank statements."
+authors = ["Gustave Coulombe <magikgus@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.10"
+pandas = "^2.2.1"
+sqlalchemy = "^2.0.29"
+platformdirs = "^4.2.0"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
