@@ -1,6 +1,6 @@
 # MidasTouch
 
-MidasTouch is a powerful package that allows you to parse and analyze bank account lists of transactions/statements. With MidasTouch, you can easily extract valuable information from your bank account data and perform various analysis tasks.
+MidasTouch is a simple package that allows you to parse and analyze bank account lists of transactions/statements. With MidasTouch, you can easily extract information from your bank account data and perform various analysis tasks.
 
 ## Current Features
 - **Parsing**: MidasTouch can parse transaction data from CSV files downloaded from various banks.
