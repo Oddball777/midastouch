@@ -3,6 +3,8 @@
 *.lock
 **.py
 **.pyc
+pdfs
+.DS_Store
 
 !data/example.csv
 !midastouch/*.py

@@ -1,5 +1,6 @@
 import hashlib
 import os
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -283,6 +284,9 @@ class DebitAccount:
             data = pd.read_csv(file_path, header=None)
             data.columns = ["date", "description", "withdrawal", "deposit", "balance"]
             data["date"] = pd.to_datetime(data["date"])
+            # replace multiple spaces with single space
+            data["description"] = data["description"].apply(lambda x: re.sub(" +", " ", x))
+            data["description"] = data["description"].str.ljust(20)
         except UnicodeDecodeError:
             data = pd.read_csv(file_path, header=None, encoding="latin1")
             # keep only columns 2, 3, 5, 7, 8, 13
