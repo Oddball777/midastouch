@@ -2,10 +2,12 @@ import hashlib
 import os
 import re
 from datetime import datetime
+from nis import cat
 from pathlib import Path
 from typing import Optional
 
 import pandas as pd
+import yaml
 from platformdirs import user_data_dir
 from sqlalchemy import DateTime, Float, String, create_engine, func, or_
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
@@ -124,6 +126,160 @@ class CreditTransaction(Base):
             rep += f"payment={self.payment!r}, "
         rep += f"balance={self.balance!r})"
         return rep
+
+
+class Category:
+    def __init__(self, name):
+        # get the path to the YAML file (in the midastouch application directory)
+        directory = user_data_dir("bankdata", roaming=True, ensure_exists=True)
+        self.yaml_file_path = directory + "/categories.yml"
+
+        # if the YAML file does not exist, create it with empty dict
+        if not os.path.exists(self.yaml_file_path):
+            with open(self.yaml_file_path, "w") as yaml_file:
+                yaml.dump({}, yaml_file)
+
+        # load the categories from the YAML file and set them as attributes
+        with open(self.yaml_file_path, "r") as yaml_file:
+            categories = yaml.safe_load(yaml_file)
+        self.name = name
+
+        try:
+            self.keywords = categories[name]
+            if len(self.keywords) == 0:
+                print(
+                    f"Category '{name}' has no keywords. Add keywords using the add_keywords method."
+                )
+        except KeyError:
+            # if the category does not exist, create it with an empty list of keywords
+            categories[name] = []
+            with open(self.yaml_file_path, "w") as yaml_file:
+                yaml.dump(categories, yaml_file)
+            self.keywords = []
+            # warn the user that new category was created and that they should add keywords
+            print(
+                f"Created new category '{name}'. Add keywords using the add_keywords method."
+            )
+
+    def add_keywords(self, keywords: list[str] = [], sub_categories: list[str] = []):
+        """
+        Add keywords to a category.
+
+        Parameters
+        ----------
+        keywords : list[str]
+            A list of keywords to add to the category.
+        sub_categories : list[str]
+            If the current category is a parent category, you can specify subcategories which will be included in the parent category.
+        """
+        keywords_to_add = []
+        with open(self.yaml_file_path, "r") as yaml_file:
+            available_categories = yaml.safe_load(yaml_file)
+
+        # Add new keywords to the category
+        for keyword in keywords:
+            if keyword not in self.keywords:
+                keywords_to_add.append(keyword)
+
+        # Add keywords from subcategories to the parent category
+        for sub_category in sub_categories:
+            if sub_category not in available_categories.keys():
+                available = ", ".join(available_categories.keys())
+                raise KeyError(
+                    f"Category {sub_category} does not exist. Available categories: {available}"
+                )
+            if sub_category == self.name:
+                available = ", ".join(available_categories.keys())
+                raise ValueError(
+                    f"Cannot add {self.name} category to itself. Available categories: {available}"
+                )
+            sub_category_keywords = available_categories[sub_category]
+            for keyword in sub_category_keywords:
+                if keyword not in self.keywords:
+                    keywords_to_add.append(keyword)
+
+        # Add new keywords to the category
+        self.keywords.extend(keywords_to_add)
+
+        # Update the YAML file by adding the new keywords to the category
+        try:
+            available_categories[self.name] = (
+                available_categories[self.name] + keywords_to_add
+            )
+        except KeyError:
+            available_categories[self.name] = keywords_to_add
+
+        with open(self.yaml_file_path, "w") as yaml_file:
+            yaml.dump(available_categories, yaml_file)
+
+    def remove_keywords(self, keywords: list[str] = [], sub_categories: list[str] = []):
+        """
+        Remove keywords from a category.
+
+        Parameters
+        ----------
+        keywords : list[str]
+            A list of keywords to remove from the category.
+        sub_categories : list[str]
+            If the current category is a parent category, you can specify subcategories which will be removed from the parent category.
+        """
+        keywords_to_remove = []
+        with open(self.yaml_file_path, "r") as yaml_file:
+            available_categories = yaml.safe_load(yaml_file)
+
+        # Remove keywords from the category
+        for keyword in keywords:
+            if keyword in self.keywords:
+                keywords_to_remove.append(keyword)
+
+        # Remove keywords from subcategories from the parent category
+        for sub_category in sub_categories:
+            if sub_category not in available_categories.keys():
+                available = ", ".join(available_categories.keys())
+                raise KeyError(
+                    f"Category {sub_category} does not exist. Available categories: {available}"
+                )
+            if sub_category == self.name:
+                available = ", ".join(available_categories.keys())
+                raise ValueError(
+                    f"Cannot remove {self.name} category from itself. Available categories: {available}"
+                )
+            sub_category_keywords = available_categories[sub_category]
+            for keyword in sub_category_keywords:
+                if keyword in self.keywords:
+                    keywords_to_remove.append(keyword)
+
+        # Remove keywords from the category
+        for keyword in keywords_to_remove:
+            self.keywords.remove(keyword)
+
+        # Update the YAML file by removing the keywords from the category
+        available_categories[self.name] = [
+            keyword
+            for keyword in available_categories[self.name]
+            if keyword not in keywords_to_remove
+        ]
+
+        with open(self.yaml_file_path, "w") as yaml_file:
+            yaml.dump(available_categories, yaml_file)
+
+    def delete_category(self):
+        """
+        Delete the category from memory.
+        """
+        with open(self.yaml_file_path, "r") as yaml_file:
+            available_categories = yaml.safe_load(yaml_file)
+        try:
+            del available_categories[self.name]
+        except KeyError:
+            print(f"Category {self.name} does not exist.")
+            return
+        with open(self.yaml_file_path, "w") as yaml_file:
+            yaml.dump(available_categories, yaml_file)
+        del self.keywords
+        del self.name
+        del self.yaml_file_path
+        del self
 
 
 class DebitAccount:
@@ -285,7 +441,9 @@ class DebitAccount:
             data.columns = ["date", "description", "withdrawal", "deposit", "balance"]
             data["date"] = pd.to_datetime(data["date"])
             # replace multiple spaces with single space
-            data["description"] = data["description"].apply(lambda x: re.sub(" +", " ", x))
+            data["description"] = data["description"].apply(
+                lambda x: re.sub(" +", " ", x)
+            )
             data["description"] = data["description"].str.ljust(20)
         except UnicodeDecodeError:
             data = pd.read_csv(file_path, header=None, encoding="latin1")
@@ -339,7 +497,7 @@ class DebitAccount:
         withdrawals: bool = True,
         date_start: Optional[datetime | str] = None,
         date_end: Optional[datetime | str] = None,
-        description_contains: Optional[str | list[str]] = None,
+        description_contains: Optional[str | list[str] | Category] = None,
     ):
         """
         Get all transactions in the database.
@@ -354,7 +512,7 @@ class DebitAccount:
             The start date to filter transactions.
         date_end : datetime or str, optional
             The end date to filter transactions.
-        description_contains : str | list[str], optional
+        description_contains : str, list[str], or Category, optional
             A string to search for in the transaction descriptions.
 
         Returns
@@ -389,6 +547,22 @@ class DebitAccount:
                         ]
                     )
                 )
+            elif isinstance(description_contains, Category):
+                if len(description_contains.keywords) == 0:
+                    # if the category has no keywords, return an empty list
+                    return []
+                query = query.filter(
+                    or_(
+                        *[
+                            DebitTransaction.description.contains(keyword)
+                            for keyword in description_contains.keywords
+                        ]
+                    )
+                )
+            else:
+                raise ValueError(
+                    "description_contains must be a string, list of strings, or Category object."
+                )
         query = query.order_by(DebitTransaction.date)
         return query.all()
 
@@ -412,7 +586,7 @@ class DebitAccount:
         withdrawals: bool = True,
         date_start: Optional[datetime | str] = None,
         date_end: Optional[datetime | str] = None,
-        description_contains: Optional[str | list[str]] = None,
+        description_contains: Optional[str | list[str] | Category] = None,
     ) -> int:
         """
         Get the number of transactions in the database.
@@ -427,7 +601,7 @@ class DebitAccount:
             The start date to filter transactions.
         date_end : datetime or str, optional
             The end date to filter transactions.
-        description_contains : str or list[str], optional
+        description_contains : str, list[str], or Category, optional
             A string to search for in the transaction descriptions.
 
         Returns
@@ -462,6 +636,22 @@ class DebitAccount:
                         ]
                     )
                 )
+            elif isinstance(description_contains, Category):
+                if len(description_contains.keywords) == 0:
+                    # if the category has no keywords, return 0
+                    return 0
+                query = query.filter(
+                    or_(
+                        *[
+                            DebitTransaction.description.contains(keyword)
+                            for keyword in description_contains.keywords
+                        ]
+                    )
+                )
+            else:
+                raise ValueError(
+                    "description_contains must be a string, list of strings, or Category object."
+                )
         return query.scalar()
 
     def sum_transactions(
@@ -470,7 +660,7 @@ class DebitAccount:
         withdrawals: bool = True,
         date_start: Optional[datetime | str] = None,
         date_end: Optional[datetime | str] = None,
-        description_contains: Optional[str | list[str]] = None,
+        description_contains: Optional[str | list[str] | Category] = None,
     ):
         """
         Get the sum of all transactions which match the specified criteria.
@@ -485,7 +675,7 @@ class DebitAccount:
             The start date to filter transactions.
         date_end : datetime or str, optional
             The end date to filter transactions.
-        description_contains : str or list[str], optional
+        description_contains : str, list[str], or Category, optional
             A string to search for in the transaction descriptions.
 
         Returns
@@ -522,7 +712,22 @@ class DebitAccount:
                         ]
                     )
                 )
-
+            elif isinstance(description_contains, Category):
+                if len(description_contains.keywords) == 0:
+                    # if the category has no keywords, return 0
+                    return 0
+                query = query.filter(
+                    or_(
+                        *[
+                            DebitTransaction.description.contains(keyword)
+                            for keyword in description_contains.keywords
+                        ]
+                    )
+                )
+            else:
+                raise ValueError(
+                    "description_contains must be a string, list of strings, or Category object."
+                )
         deposit, withdrawal = query.one()
         return round((deposit or 0) - (withdrawal or 0), 2)
 
@@ -532,7 +737,7 @@ class DebitAccount:
         withdrawals: bool = True,
         date_start: Optional[datetime | str] = None,
         date_end: Optional[datetime | str] = None,
-        description_contains: Optional[str | list[str]] = None,
+        description_contains: Optional[str | list[str] | Category] = None,
     ):
         """
         Get the average of all transactions which match the specified criteria.
@@ -547,7 +752,7 @@ class DebitAccount:
             The start date to filter transactions.
         date_end : datetime or str, optional
             The end date to filter transactions.
-        description_contains : str or list[str], optional
+        description_contains : str, list[str], or Category, optional
             A string to search for in the transaction descriptions.
 
         Returns
@@ -794,7 +999,7 @@ class CreditAccount:
         payments: bool = True,
         date_start: Optional[datetime | str] = None,
         date_end: Optional[datetime | str] = None,
-        description_contains: Optional[str | list[str]] = None,
+        description_contains: Optional[str | list[str] | Category] = None,
     ):
         """
         Get all transactions in the database.
@@ -809,7 +1014,7 @@ class CreditAccount:
             The start date to filter transactions.
         date_end : datetime or str, optional
             The end date to filter transactions.
-        description_contains : str or list[str], optional
+        description_contains : str, list[str], or Category, optional
             A string to search for in the transaction descriptions.
 
         Returns
@@ -844,6 +1049,22 @@ class CreditAccount:
                         ]
                     )
                 )
+            elif isinstance(description_contains, Category):
+                if len(description_contains.keywords) == 0:
+                    # if the category has no keywords, return an empty list
+                    return []
+                query = query.filter(
+                    or_(
+                        *[
+                            CreditTransaction.description.contains(keyword)
+                            for keyword in description_contains.keywords
+                        ]
+                    )
+                )
+            else:
+                raise ValueError(
+                    "description_contains must be a string, list of strings, or Category object."
+                )
         query = query.order_by(CreditTransaction.date)
         return query.all()
 
@@ -867,7 +1088,7 @@ class CreditAccount:
         payments: bool = True,
         date_start: Optional[datetime | str] = None,
         date_end: Optional[datetime | str] = None,
-        description_contains: Optional[str | list[str]] = None,
+        description_contains: Optional[str | list[str] | Category] = None,
     ) -> int:
         """
         Get the number of transactions in the database.
@@ -882,7 +1103,7 @@ class CreditAccount:
             The start date to filter transactions.
         date_end : datetime or str, optional
             The end date to filter transactions.
-        description_contains : str or list[str], optional
+        description_contains : str, list[str], or Category, optional
             A string to search for in the transaction descriptions.
 
         Returns
@@ -917,6 +1138,22 @@ class CreditAccount:
                         ]
                     )
                 )
+            elif isinstance(description_contains, Category):
+                if len(description_contains.keywords) == 0:
+                    # if the category has no keywords, return 0
+                    return 0
+                query = query.filter(
+                    or_(
+                        *[
+                            CreditTransaction.description.contains(keyword)
+                            for keyword in description_contains.keywords
+                        ]
+                    )
+                )
+            else:
+                raise ValueError(
+                    "description_contains must be a string, list of strings, or Category object."
+                )
 
         return query.scalar()
 
@@ -926,7 +1163,7 @@ class CreditAccount:
         payments: bool = True,
         date_start: Optional[datetime | str] = None,
         date_end: Optional[datetime | str] = None,
-        description_contains: Optional[str | list[str]] = None,
+        description_contains: Optional[str | list[str] | Category] = None,
     ):
         """
         Get the sum of all transactions which match the specified criteria.
@@ -941,7 +1178,7 @@ class CreditAccount:
             The start date to filter transactions.
         date_end : datetime or str, optional
             The end date to filter transactions.
-        description_contains : str or list[str], optional
+        description_contains : str, list[str], or Category, optional
             A string to search for in the transaction descriptions.
 
         Returns
@@ -978,6 +1215,22 @@ class CreditAccount:
                         ]
                     )
                 )
+            elif isinstance(description_contains, Category):
+                if len(description_contains.keywords) == 0:
+                    # if the category has no keywords, return 0
+                    return 0
+                query = query.filter(
+                    or_(
+                        *[
+                            CreditTransaction.description.contains(keyword)
+                            for keyword in description_contains.keywords
+                        ]
+                    )
+                )
+            else:
+                raise ValueError(
+                    "description_contains must be a string, list of strings, or Category object."
+                )
         charge, payment = query.one()
         return (charge or 0) - (payment or 0)
 
@@ -987,7 +1240,7 @@ class CreditAccount:
         payments: bool = True,
         date_start: Optional[datetime | str] = None,
         date_end: Optional[datetime | str] = None,
-        description_contains: Optional[str | list[str]] = None,
+        description_contains: Optional[str | list[str] | Category] = None,
     ):
         """
         Get the average of all transactions which match the specified criteria.
@@ -1002,7 +1255,7 @@ class CreditAccount:
             The start date to filter transactions.
         date_end : datetime or str, optional
             The end date to filter transactions.
-        description_contains : str or list[str], optional
+        description_contains : str, list[str], or Category, optional
             A string to search for in the transaction descriptions.
 
         Returns
@@ -1020,6 +1273,8 @@ class CreditAccount:
         count = self.count_transactions(
             charges, payments, date_start, date_end, description_contains
         )
+        if count == 0:
+            raise ValueError("No transactions found for the specified criteria.")
         return total / count
 
     def check_validity(self):
