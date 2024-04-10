@@ -2,7 +2,6 @@ import hashlib
 import os
 import re
 from datetime import datetime
-from nis import cat
 from pathlib import Path
 from typing import Optional
 
