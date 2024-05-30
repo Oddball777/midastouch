@@ -280,6 +280,22 @@ class Category:
         del self.yaml_file_path
         del self
 
+    @classmethod
+    def get_all_categories(cls):
+        """
+        Get all category names.
+
+        Returns
+        -------
+        list[str]
+            A list of all category names.
+        """
+        directory = user_data_dir("bankdata", roaming=True, ensure_exists=True)
+        yaml_file_path = directory + "/categories.yml"
+        with open(yaml_file_path, "r") as yaml_file:
+            available_categories = yaml.safe_load(yaml_file)
+        return list(available_categories.keys())
+
 
 class DebitAccount:
     def __init__(self, name, create=False):
