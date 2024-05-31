@@ -3,12 +3,12 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Self, Union
 
 import pandas as pd
 import yaml
 from platformdirs import user_data_dir
-from sqlalchemy import DateTime, Float, String, create_engine, func, or_
+from sqlalchemy import DateTime, Float, String, and_, create_engine, func, or_
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 
@@ -506,81 +506,6 @@ class DebitAccount:
                 balance=row["balance"],
             )
 
-    def get_transactions(
-        self,
-        deposits: bool = True,
-        withdrawals: bool = True,
-        date_start: Optional[datetime | str] = None,
-        date_end: Optional[datetime | str] = None,
-        description_contains: Optional[str | list[str] | Category] = None,
-    ):
-        """
-        Get all transactions in the database.
-
-        Parameters
-        ----------
-        deposits : bool, optional
-            Whether to include deposits in the results.
-        withdrawals : bool, optional
-            Whether to include withdrawals in the results.
-        date_start : datetime or str, optional
-            The start date to filter transactions.
-        date_end : datetime or str, optional
-            The end date to filter transactions.
-        description_contains : str, list[str], or Category, optional
-            A string to search for in the transaction descriptions.
-
-        Returns
-        -------
-        list[Transaction]
-            A list of all transactions in the database that match the criteria.
-        """
-        if isinstance(date_start, str):
-            date_start = datetime.fromisoformat(date_start)
-        if isinstance(date_end, str):
-            date_end = datetime.fromisoformat(date_end)
-        query = self.session.query(DebitTransaction)
-        if not deposits:
-            query = query.filter(DebitTransaction.deposit.is_(None))
-        if not withdrawals:
-            query = query.filter(DebitTransaction.withdrawal.is_(None))
-        if date_start is not None:
-            query = query.filter(DebitTransaction.date >= date_start)
-        if date_end is not None:
-            query = query.filter(DebitTransaction.date <= date_end)
-        if description_contains is not None:
-            if isinstance(description_contains, str):
-                query = query.filter(
-                    DebitTransaction.description.contains(description_contains)
-                )
-            elif isinstance(description_contains, list):
-                query = query.filter(
-                    or_(
-                        *[
-                            DebitTransaction.description.contains(keyword)
-                            for keyword in description_contains
-                        ]
-                    )
-                )
-            elif isinstance(description_contains, Category):
-                if len(description_contains.keywords) == 0:
-                    # if the category has no keywords, return an empty list
-                    return []
-                query = query.filter(
-                    or_(
-                        *[
-                            DebitTransaction.description.contains(keyword)
-                            for keyword in description_contains.keywords
-                        ]
-                    )
-                )
-            else:
-                raise ValueError(
-                    "description_contains must be a string, list of strings, or Category object."
-                )
-        query = query.order_by(DebitTransaction.date)
-        return query.all()
-
     def get_balance(self) -> float:
         """
         Get the current balance of the account.
@@ -594,205 +519,6 @@ class DebitAccount:
         if first_transaction is None:
             raise ValueError("No transactions found")
         return first_transaction.balance
-
-    def count_transactions(
-        self,
-        deposits: bool = True,
-        withdrawals: bool = True,
-        date_start: Optional[datetime | str] = None,
-        date_end: Optional[datetime | str] = None,
-        description_contains: Optional[str | list[str] | Category] = None,
-    ) -> int:
-        """
-        Get the number of transactions in the database.
-
-        Parameters
-        ----------
-        deposits : bool, optional
-            Whether to include deposits in the count.
-        withdrawals : bool, optional
-            Whether to include withdrawals in the count.
-        date_start : datetime or str, optional
-            The start date to filter transactions.
-        date_end : datetime or str, optional
-            The end date to filter transactions.
-        description_contains : str, list[str], or Category, optional
-            A string to search for in the transaction descriptions.
-
-        Returns
-        -------
-        int
-            The number of transactions in the database that match the criteria.
-        """
-        if isinstance(date_start, str):
-            date_start = datetime.fromisoformat(date_start)
-        if isinstance(date_end, str):
-            date_end = datetime.fromisoformat(date_end)
-        query = self.session.query(func.count(DebitTransaction.id))
-        if not deposits:
-            query = query.filter(DebitTransaction.deposit.is_(None))
-        if not withdrawals:
-            query = query.filter(DebitTransaction.withdrawal.is_(None))
-        if date_start is not None:
-            query = query.filter(DebitTransaction.date >= date_start)
-        if date_end is not None:
-            query = query.filter(DebitTransaction.date <= date_end)
-        if description_contains is not None:
-            if isinstance(description_contains, str):
-                query = query.filter(
-                    DebitTransaction.description.contains(description_contains)
-                )
-            elif isinstance(description_contains, list):
-                query = query.filter(
-                    or_(
-                        *[
-                            DebitTransaction.description.contains(keyword)
-                            for keyword in description_contains
-                        ]
-                    )
-                )
-            elif isinstance(description_contains, Category):
-                if len(description_contains.keywords) == 0:
-                    # if the category has no keywords, return 0
-                    return 0
-                query = query.filter(
-                    or_(
-                        *[
-                            DebitTransaction.description.contains(keyword)
-                            for keyword in description_contains.keywords
-                        ]
-                    )
-                )
-            else:
-                raise ValueError(
-                    "description_contains must be a string, list of strings, or Category object."
-                )
-        return query.scalar()
-
-    def sum_transactions(
-        self,
-        deposits: bool = True,
-        withdrawals: bool = True,
-        date_start: Optional[datetime | str] = None,
-        date_end: Optional[datetime | str] = None,
-        description_contains: Optional[str | list[str] | Category] = None,
-    ):
-        """
-        Get the sum of all transactions which match the specified criteria.
-
-        Parameters
-        ----------
-        deposits : bool, optional
-            Whether to include deposits in the sum.
-        withdrawals : bool, optional
-            Whether to include withdrawals in the sum.
-        date_start : datetime or str, optional
-            The start date to filter transactions.
-        date_end : datetime or str, optional
-            The end date to filter transactions.
-        description_contains : str, list[str], or Category, optional
-            A string to search for in the transaction descriptions.
-
-        Returns
-        -------
-        float
-            The sum of all transactions that contain the specified string.
-        """
-        if isinstance(date_start, str):
-            date_start = datetime.fromisoformat(date_start)
-        if isinstance(date_end, str):
-            date_end = datetime.fromisoformat(date_end)
-        query = self.session.query(
-            func.sum(DebitTransaction.deposit), func.sum(DebitTransaction.withdrawal)
-        )
-        if not deposits:
-            query = query.filter(DebitTransaction.deposit.is_(None))
-        if not withdrawals:
-            query = query.filter(DebitTransaction.withdrawal.is_(None))
-        if date_start is not None:
-            query = query.filter(DebitTransaction.date >= date_start)
-        if date_end is not None:
-            query = query.filter(DebitTransaction.date <= date_end)
-        if description_contains is not None:
-            if isinstance(description_contains, str):
-                query = query.filter(
-                    DebitTransaction.description.contains(description_contains)
-                )
-            elif isinstance(description_contains, list):
-                query = query.filter(
-                    or_(
-                        *[
-                            DebitTransaction.description.contains(keyword)
-                            for keyword in description_contains
-                        ]
-                    )
-                )
-            elif isinstance(description_contains, Category):
-                if len(description_contains.keywords) == 0:
-                    # if the category has no keywords, return 0
-                    return 0
-                query = query.filter(
-                    or_(
-                        *[
-                            DebitTransaction.description.contains(keyword)
-                            for keyword in description_contains.keywords
-                        ]
-                    )
-                )
-            else:
-                raise ValueError(
-                    "description_contains must be a string, list of strings, or Category object."
-                )
-        deposit, withdrawal = query.one()
-        return round((deposit or 0) - (withdrawal or 0), 2)
-
-    def average_transactions(
-        self,
-        deposits: bool = True,
-        withdrawals: bool = True,
-        date_start: Optional[datetime | str] = None,
-        date_end: Optional[datetime | str] = None,
-        description_contains: Optional[str | list[str] | Category] = None,
-    ):
-        """
-        Get the average of all transactions which match the specified criteria.
-
-        Parameters
-        ----------
-        deposits : bool, optional
-            Whether to include deposits in the average.
-        withdrawals : bool, optional
-            Whether to include withdrawals in the average.
-        date_start : datetime or str, optional
-            The start date to filter transactions.
-        date_end : datetime or str, optional
-            The end date to filter transactions.
-        description_contains : str, list[str], or Category, optional
-            A string to search for in the transaction descriptions.
-
-        Returns
-        -------
-        float
-            The average value of all transactions that match the criteria.
-        """
-        if isinstance(date_start, str):
-            date_start = datetime.fromisoformat(date_start)
-        if isinstance(date_end, str):
-            date_end = datetime.fromisoformat(date_end)
-        if (
-            self.count_transactions(
-                deposits, withdrawals, date_start, date_end, description_contains
-            )
-            == 0
-        ):
-            raise ValueError("No transactions found for the specified criteria.")
-        total = self.sum_transactions(
-            deposits, withdrawals, date_start, date_end, description_contains
-        )
-        count = self.count_transactions(
-            deposits, withdrawals, date_start, date_end, description_contains
-        )
-        return total / count
 
     def check_validity(self):
         """
@@ -825,6 +551,18 @@ class DebitAccount:
         Close the database session.
         """
         self.session.close()
+
+    def query(self):
+        """
+        Execute a custom query on the database.
+
+        Parameters
+        ----------
+        query_str : str
+            The query string to execute.
+        """
+
+        return TransactionQuery(self.session, DebitTransaction)
 
 
 class CreditAccount:
@@ -1008,81 +746,6 @@ class CreditAccount:
                 balance=row["balance"],
             )
 
-    def get_transactions(
-        self,
-        charges: bool = True,
-        payments: bool = True,
-        date_start: Optional[datetime | str] = None,
-        date_end: Optional[datetime | str] = None,
-        description_contains: Optional[str | list[str] | Category] = None,
-    ):
-        """
-        Get all transactions in the database.
-
-        Parameters
-        ----------
-        charges : bool, optional
-            Whether to include charges in the results.
-        payments : bool, optional
-            Whether to include payments in the results.
-        date_start : datetime or str, optional
-            The start date to filter transactions.
-        date_end : datetime or str, optional
-            The end date to filter transactions.
-        description_contains : str, list[str], or Category, optional
-            A string to search for in the transaction descriptions.
-
-        Returns
-        -------
-        list[Transaction]
-            A list of all transactions in the database that match the criteria.
-        """
-        if isinstance(date_start, str):
-            date_start = datetime.fromisoformat(date_start)
-        if isinstance(date_end, str):
-            date_end = datetime.fromisoformat(date_end)
-        query = self.session.query(CreditTransaction)
-        if not charges:
-            query = query.filter(CreditTransaction.charge.is_(None))
-        if not payments:
-            query = query.filter(CreditTransaction.payment.is_(None))
-        if date_start is not None:
-            query = query.filter(CreditTransaction.date >= date_start)
-        if date_end is not None:
-            query = query.filter(CreditTransaction.date <= date_end)
-        if description_contains is not None:
-            if isinstance(description_contains, str):
-                query = query.filter(
-                    CreditTransaction.description.contains(description_contains)
-                )
-            elif isinstance(description_contains, list):
-                query = query.filter(
-                    or_(
-                        *[
-                            CreditTransaction.description.contains(keyword)
-                            for keyword in description_contains
-                        ]
-                    )
-                )
-            elif isinstance(description_contains, Category):
-                if len(description_contains.keywords) == 0:
-                    # if the category has no keywords, return an empty list
-                    return []
-                query = query.filter(
-                    or_(
-                        *[
-                            CreditTransaction.description.contains(keyword)
-                            for keyword in description_contains.keywords
-                        ]
-                    )
-                )
-            else:
-                raise ValueError(
-                    "description_contains must be a string, list of strings, or Category object."
-                )
-        query = query.order_by(CreditTransaction.date)
-        return query.all()
-
     def get_balance(self) -> float:
         """
         Get the current balance of the account.
@@ -1096,201 +759,6 @@ class CreditAccount:
         if first_transaction is None:
             raise ValueError("No transactions found")
         return first_transaction.balance
-
-    def count_transactions(
-        self,
-        charges: bool = True,
-        payments: bool = True,
-        date_start: Optional[datetime | str] = None,
-        date_end: Optional[datetime | str] = None,
-        description_contains: Optional[str | list[str] | Category] = None,
-    ) -> int:
-        """
-        Get the number of transactions in the database.
-
-        Parameters
-        ----------
-        charges : bool, optional
-            Whether to include charges in the count.
-        payments : bool, optional
-            Whether to include payments in the count.
-        date_start : datetime or str, optional
-            The start date to filter transactions.
-        date_end : datetime or str, optional
-            The end date to filter transactions.
-        description_contains : str, list[str], or Category, optional
-            A string to search for in the transaction descriptions.
-
-        Returns
-        -------
-        int
-            The number of transactions in the database that match the criteria.
-        """
-        if isinstance(date_start, str):
-            date_start = datetime.fromisoformat(date_start)
-        if isinstance(date_end, str):
-            date_end = datetime.fromisoformat(date_end)
-        query = self.session.query(func.count(CreditTransaction.id))
-        if not charges:
-            query = query.filter(CreditTransaction.charge.is_(None))
-        if not payments:
-            query = query.filter(CreditTransaction.payment.is_(None))
-        if date_start is not None:
-            query = query.filter(CreditTransaction.date >= date_start)
-        if date_end is not None:
-            query = query.filter(CreditTransaction.date <= date_end)
-        if description_contains is not None:
-            if isinstance(description_contains, str):
-                query = query.filter(
-                    CreditTransaction.description.contains(description_contains)
-                )
-            elif isinstance(description_contains, list):
-                query = query.filter(
-                    or_(
-                        *[
-                            CreditTransaction.description.contains(keyword)
-                            for keyword in description_contains
-                        ]
-                    )
-                )
-            elif isinstance(description_contains, Category):
-                if len(description_contains.keywords) == 0:
-                    # if the category has no keywords, return 0
-                    return 0
-                query = query.filter(
-                    or_(
-                        *[
-                            CreditTransaction.description.contains(keyword)
-                            for keyword in description_contains.keywords
-                        ]
-                    )
-                )
-            else:
-                raise ValueError(
-                    "description_contains must be a string, list of strings, or Category object."
-                )
-
-        return query.scalar()
-
-    def sum_transactions(
-        self,
-        charges: bool = True,
-        payments: bool = True,
-        date_start: Optional[datetime | str] = None,
-        date_end: Optional[datetime | str] = None,
-        description_contains: Optional[str | list[str] | Category] = None,
-    ):
-        """
-        Get the sum of all transactions which match the specified criteria.
-
-        Parameters
-        ----------
-        charges : bool, optional
-            Whether to include charges in the sum.
-        payments : bool, optional
-            Whether to include payments in the sum.
-        date_start : datetime or str, optional
-            The start date to filter transactions.
-        date_end : datetime or str, optional
-            The end date to filter transactions.
-        description_contains : str, list[str], or Category, optional
-            A string to search for in the transaction descriptions.
-
-        Returns
-        -------
-        float
-            The sum of all transactions that contain the specified string.
-        """
-        if isinstance(date_start, str):
-            date_start = datetime.fromisoformat(date_start)
-        if isinstance(date_end, str):
-            date_end = datetime.fromisoformat(date_end)
-        query = self.session.query(
-            func.sum(CreditTransaction.charge), func.sum(CreditTransaction.payment)
-        )
-        if not charges:
-            query = query.filter(CreditTransaction.charge.is_(None))
-        if not payments:
-            query = query.filter(CreditTransaction.payment.is_(None))
-        if date_start is not None:
-            query = query.filter(CreditTransaction.date >= date_start)
-        if date_end is not None:
-            query = query.filter(CreditTransaction.date <= date_end)
-        if description_contains is not None:
-            if isinstance(description_contains, str):
-                query = query.filter(
-                    CreditTransaction.description.contains(description_contains)
-                )
-            elif isinstance(description_contains, list):
-                query = query.filter(
-                    or_(
-                        *[
-                            CreditTransaction.description.contains(keyword)
-                            for keyword in description_contains
-                        ]
-                    )
-                )
-            elif isinstance(description_contains, Category):
-                if len(description_contains.keywords) == 0:
-                    # if the category has no keywords, return 0
-                    return 0
-                query = query.filter(
-                    or_(
-                        *[
-                            CreditTransaction.description.contains(keyword)
-                            for keyword in description_contains.keywords
-                        ]
-                    )
-                )
-            else:
-                raise ValueError(
-                    "description_contains must be a string, list of strings, or Category object."
-                )
-        charge, payment = query.one()
-        return (charge or 0) - (payment or 0)
-
-    def average_transactions(
-        self,
-        charges: bool = True,
-        payments: bool = True,
-        date_start: Optional[datetime | str] = None,
-        date_end: Optional[datetime | str] = None,
-        description_contains: Optional[str | list[str] | Category] = None,
-    ):
-        """
-        Get the average of all transactions which match the specified criteria.
-
-        Parameters
-        ----------
-        charges : bool, optional
-            Whether to include charges in the average.
-        payments : bool, optional
-            Whether to include payments in the average.
-        date_start : datetime or str, optional
-            The start date to filter transactions.
-        date_end : datetime or str, optional
-            The end date to filter transactions.
-        description_contains : str, list[str], or Category, optional
-            A string to search for in the transaction descriptions.
-
-        Returns
-        -------
-        float
-            The average value of all transactions that match the criteria.
-        """
-        if isinstance(date_start, str):
-            date_start = datetime.fromisoformat(date_start)
-        if isinstance(date_end, str):
-            date_end = datetime.fromisoformat(date_end)
-        total = self.sum_transactions(
-            charges, payments, date_start, date_end, description_contains
-        )
-        count = self.count_transactions(
-            charges, payments, date_start, date_end, description_contains
-        )
-        if count == 0:
-            raise ValueError("No transactions found for the specified criteria.")
-        return total / count
 
     def check_validity(self):
         """
@@ -1320,6 +788,475 @@ class CreditAccount:
         Close the database session.
         """
         self.session.close()
+
+    def query(self):
+        """
+        Execute a custom query on the database.
+
+        Parameters
+        ----------
+        query_str : str
+            The query string to execute.
+        """
+
+        return TransactionQuery(self.session, CreditTransaction)
+
+
+class TransactionQuery:
+    def __init__(self, session, transaction_type):
+        self.session = session
+        self.transaction_type = transaction_type
+        self.query = session.query(self.transaction_type)
+        self.group_by_attr = None
+
+    def filter_transactions(self, include: bool, transaction_field):
+        if not include:
+            self.query = self.query.filter(transaction_field.is_(None))
+        return self
+
+    def filter_deposits(self, include: bool):
+        if self.transaction_type == DebitTransaction:
+            return self.filter_transactions(include, DebitTransaction.deposit)
+        return self
+
+    def filter_withdrawals(self, include: bool):
+        if self.transaction_type == DebitTransaction:
+            return self.filter_transactions(include, DebitTransaction.withdrawal)
+        return self
+
+    def filter_charges(self, include: bool):
+        if self.transaction_type == CreditTransaction:
+            return self.filter_transactions(include, CreditTransaction.charge)
+        return self
+
+    def filter_payments(self, include: bool):
+        if self.transaction_type == CreditTransaction:
+            return self.filter_transactions(include, CreditTransaction.payment)
+        return self
+
+    def filter_date_range(
+        self,
+        date_start: Optional[Union[datetime, str]] = None,
+        date_end: Optional[Union[datetime, str]] = None,
+        invert: bool = False,
+    ):
+        if isinstance(date_start, str):
+            date_start = datetime.fromisoformat(date_start)
+        if isinstance(date_end, str):
+            date_end = datetime.fromisoformat(date_end)
+
+        if date_start is not None and date_end is not None:
+            if invert:
+                self.query = self.query.filter(
+                    or_(
+                        self.transaction_type.date < date_start,
+                        self.transaction_type.date > date_end,
+                    )
+                )
+            else:
+                self.query = self.query.filter(
+                    self.transaction_type.date >= date_start,
+                    self.transaction_type.date <= date_end,
+                )
+        elif date_start is not None:
+            if invert:
+                self.query = self.query.filter(self.transaction_type.date < date_start)
+            else:
+                self.query = self.query.filter(self.transaction_type.date >= date_start)
+        elif date_end is not None:
+            if invert:
+                self.query = self.query.filter(self.transaction_type.date > date_end)
+            else:
+                self.query = self.query.filter(self.transaction_type.date <= date_end)
+
+        return self
+
+    def filter_description(
+        self,
+        description_contains: Optional[Union[str, list[str], Category]] = None,
+        invert: bool = False,
+    ):
+        if description_contains is not None:
+            if isinstance(description_contains, str):
+                if invert:
+                    self.query = self.query.filter(
+                        ~self.transaction_type.description.contains(
+                            description_contains
+                        )
+                    )
+                else:
+                    self.query = self.query.filter(
+                        self.transaction_type.description.contains(description_contains)
+                    )
+            elif isinstance(description_contains, list):
+                if invert:
+                    self.query = self.query.filter(
+                        ~or_(
+                            *[
+                                self.transaction_type.description.contains(keyword)
+                                for keyword in description_contains
+                            ]
+                        )
+                    )
+                else:
+                    self.query = self.query.filter(
+                        or_(
+                            *[
+                                self.transaction_type.description.contains(keyword)
+                                for keyword in description_contains
+                            ]
+                        )
+                    )
+            elif isinstance(description_contains, Category):
+                if len(description_contains.keywords) == 0:
+                    # if the category has no keywords, return an empty list
+                    return self
+                if invert:
+                    self.query = self.query.filter(
+                        ~or_(
+                            *[
+                                self.transaction_type.description.contains(keyword)
+                                for keyword in description_contains.keywords
+                            ]
+                        )
+                    )
+                else:
+                    self.query = self.query.filter(
+                        or_(
+                            *[
+                                self.transaction_type.description.contains(keyword)
+                                for keyword in description_contains.keywords
+                            ]
+                        )
+                    )
+        return self
+
+    def filter_amount(
+        self,
+        min_amount: Optional[float] = None,
+        max_amount: Optional[float] = None,
+        invert: bool = False,
+    ):
+        if self.transaction_type == DebitTransaction:
+            deposit_col = DebitTransaction.deposit
+            withdrawal_col = DebitTransaction.withdrawal
+        elif self.transaction_type == CreditTransaction:
+            deposit_col = CreditTransaction.charge
+            withdrawal_col = CreditTransaction.payment
+
+        if min_amount is not None and max_amount is not None:
+            if invert:
+                self.query = self.query.filter(
+                    or_(
+                        deposit_col < min_amount,
+                        deposit_col > max_amount,
+                        withdrawal_col < min_amount,
+                        withdrawal_col > max_amount,
+                    )
+                )
+            else:
+                self.query = self.query.filter(
+                    or_(
+                        and_(deposit_col >= min_amount, deposit_col <= max_amount),
+                        and_(
+                            withdrawal_col >= min_amount, withdrawal_col <= max_amount
+                        ),
+                    )
+                )
+        elif min_amount is not None:
+            if invert:
+                self.query = self.query.filter(
+                    or_(deposit_col < min_amount, withdrawal_col < min_amount)
+                )
+            else:
+                self.query = self.query.filter(
+                    or_(deposit_col >= min_amount, withdrawal_col >= min_amount)
+                )
+        elif max_amount is not None:
+            if invert:
+                self.query = self.query.filter(
+                    or_(deposit_col > max_amount, withdrawal_col > max_amount)
+                )
+            else:
+                self.query = self.query.filter(
+                    or_(deposit_col <= max_amount, withdrawal_col <= max_amount)
+                )
+
+        return self
+
+    def _order_by(self, field: str, ascending: bool = True):
+        if field == "date":
+            if ascending:
+                self.query = self.query.order_by(self.transaction_type.date)
+            else:
+                self.query = self.query.order_by(self.transaction_type.date.desc())
+        elif field == "amount":
+            if self.transaction_type == DebitTransaction:
+                amount = func.coalesce(DebitTransaction.deposit, 0) - func.coalesce(
+                    DebitTransaction.withdrawal, 0
+                )
+            elif self.transaction_type == CreditTransaction:
+                amount = func.coalesce(CreditTransaction.charge, 0) - func.coalesce(
+                    CreditTransaction.payment, 0
+                )
+            if ascending:
+                self.query = self.query.order_by(func.abs(amount))
+            else:
+                self.query = self.query.order_by(func.abs(amount).desc())
+
+        elif field == "description":
+            if ascending:
+                self.query = self.query.order_by(self.transaction_type.description)
+            else:
+                self.query = self.query.order_by(
+                    self.transaction_type.description.desc()
+                )
+        return self
+
+    def transactions(
+        self,
+        as_list: bool = False,
+        order_by_amount: bool = False,
+        order_by_description: bool = False,
+        ascending: bool = True,
+    ) -> list[DebitTransaction | CreditTransaction] | pd.DataFrame:
+        # raise error if more than one order_by is True
+        if sum([order_by_amount, order_by_description]) > 1:
+            raise ValueError("Only one order_by argument can be True.")
+        if order_by_amount:
+            self._order_by("amount", ascending)
+        elif order_by_description:
+            self._order_by("description", ascending)
+        else:
+            self._order_by("date", ascending)
+
+        if as_list:
+            return self.query.all()
+        else:
+            self.transactions_list = self.query.order_by(
+                self.transaction_type.date
+            ).all()
+            transactions_dicts = [to_dict(txn) for txn in self.transactions_list]
+            df = pd.DataFrame(transactions_dicts)
+            return df
+
+    def count(
+        self,
+        order_by_count: bool = False,
+        ascending: bool = True,
+    ) -> int | pd.DataFrame:
+        if self.group_by_attr:
+            period = self._group_by_period()
+            result = (
+                self.query.with_entities(
+                    period.label("period"), func.count().label("count")
+                )
+                .group_by(period)
+                .all()
+            )
+            df = pd.DataFrame(result, columns=["period", "count"])
+            if order_by_count:
+                df = df.sort_values(by="count", ascending=ascending)
+                # reset index to start from 0
+                df.reset_index(drop=True, inplace=True)
+            else:
+                df = df.sort_values(by="period", ascending=ascending)
+                # reset index to start from 0
+                df.reset_index(drop=True, inplace=True)
+            return df
+        return self.query.count()
+
+    def sum(
+        self,
+        order_by_date: bool = False,
+        order_by_sum: bool = False,
+        ascending: bool = True,
+    ) -> float | pd.DataFrame:
+        if self.group_by_attr:
+            period = self._group_by_period()
+            if self.transaction_type == DebitTransaction:
+                result = (
+                    self.query.with_entities(
+                        period.label("period"),
+                        func.coalesce(func.sum(DebitTransaction.deposit), 0).label(
+                            "deposit_sum"
+                        ),
+                        func.coalesce(func.sum(DebitTransaction.withdrawal), 0).label(
+                            "withdrawal_sum"
+                        ),
+                    )
+                    .group_by(period)
+                    .all()
+                )
+                df = pd.DataFrame(result, columns=["period", "deposit_sum", "withdrawal_sum"])
+                df["sum"] = df["deposit_sum"] - df["withdrawal_sum"]
+                df.drop(columns=["deposit_sum", "withdrawal_sum"], inplace=True)
+            elif self.transaction_type == CreditTransaction:
+                result = (
+                    self.query.with_entities(
+                        period.label("period"),
+                        func.coalesce(func.sum(CreditTransaction.charge), 0).label(
+                            "charge_sum"
+                        ),
+                        func.coalesce(func.sum(CreditTransaction.payment), 0).label(
+                            "payment_sum"
+                        ),
+                    )
+                    .group_by(period)
+                    .all()
+                )
+                df = pd.DataFrame(result, columns=["period", "charge_sum", "payment_sum"])
+                df["sum"] = df["payment_sum"] - df["charge_sum"]
+                df.drop(columns=["charge_sum", "payment_sum"], inplace=True)
+
+            if order_by_sum:
+                df.sort_values(by="sum", ascending=ascending, inplace=True)
+            else:
+                df.sort_values(by="period", ascending=ascending, inplace=True)
+
+            df.reset_index(drop=True, inplace=True)
+            return df
+
+        if self.transaction_type == DebitTransaction:
+            deposit, withdrawal = self.query.with_entities(
+                func.coalesce(func.sum(DebitTransaction.deposit), 0),
+                func.coalesce(func.sum(DebitTransaction.withdrawal), 0),
+            ).one()
+        elif self.transaction_type == CreditTransaction:
+            withdrawal, deposit = self.query.with_entities(
+                func.coalesce(func.sum(CreditTransaction.charge), 0),
+                func.coalesce(func.sum(CreditTransaction.payment), 0),
+            ).one()
+
+        return round((deposit or 0) - (withdrawal or 0), 2)
+
+    
+    def sum2(
+        self,
+        order_by_sum: bool = False,
+        ascending: bool = True,
+    ) -> float | pd.DataFrame:
+        if self.group_by_attr:
+            period = self._group_by_period()
+            if self.transaction_type == DebitTransaction:
+                result = (
+                    self.query.with_entities(
+                        period.label("period"),
+                        func.coalesce(func.sum(DebitTransaction.deposit), 0).label(
+                            "deposit_sum"
+                        ),
+                        func.coalesce(func.sum(DebitTransaction.withdrawal), 0).label(
+                            "withdrawal_sum"
+                        ),
+                    )
+                    .group_by(period)
+                    .all()
+                )
+            elif self.transaction_type == CreditTransaction:
+                result = (
+                    self.query.with_entities(
+                        period.label("period"),
+                        func.coalesce(func.sum(CreditTransaction.charge), 0).label(
+                            "charge_sum"
+                        ),
+                        func.coalesce(func.sum(CreditTransaction.payment), 0).label(
+                            "payment_sum"
+                        ),
+                    )
+                    .group_by(period)
+                    .all()
+                )
+
+            df = pd.DataFrame(
+                result, columns=["period", "deposit_sum", "withdrawal_sum"]
+            )
+            if self.transaction_type == CreditTransaction:
+                df.rename(
+                    columns={
+                        "deposit_sum": "charge_sum",
+                        "withdrawal_sum": "payment_sum",
+                    },
+                    inplace=True,
+                )
+            df["sum"] = df["deposit_sum"] - df["withdrawal_sum"]
+            df.drop(columns=["deposit_sum", "withdrawal_sum"], inplace=True)
+
+            if order_by_sum:
+                df.sort_values(by="sum", ascending=ascending, inplace=True)
+            else:
+                df.sort_values(by="period", ascending=ascending, inplace=True)
+
+            df.reset_index(drop=True, inplace=True)
+            return df
+
+        if self.transaction_type == DebitTransaction:
+            deposit, withdrawal = self.query.with_entities(
+                func.coalesce(func.sum(DebitTransaction.deposit), 0),
+                func.coalesce(func.sum(DebitTransaction.withdrawal), 0),
+            ).one()
+        elif self.transaction_type == CreditTransaction:
+            deposit, withdrawal = self.query.with_entities(
+                func.coalesce(func.sum(CreditTransaction.charge), 0),
+                func.coalesce(func.sum(CreditTransaction.payment), 0),
+            ).one()
+
+        return round((deposit or 0) - (withdrawal or 0), 2)
+
+    def average(self) -> float | pd.DataFrame:
+        if self.group_by_attr:
+            period = self._group_by_period()
+            result = (
+                self.query.with_entities(
+                    period.label("period"),
+                    func.avg(
+                        func.coalesce(self.transaction_type.deposit, 0)
+                        - func.coalesce(self.transaction_type.withdrawal, 0)
+                    ).label("average"),
+                )
+                .group_by(period)
+                .all()
+            )
+            df = pd.DataFrame(result, columns=["period", "average"])
+            return df
+        total = self.sum()
+        count = self.count()
+        if count == 0:
+            raise ValueError("No transactions found for the specified criteria.")
+        return total / count
+
+    def group_by(self, period: str):
+        if period not in {"day", "week", "month", "year"}:
+            raise ValueError(
+                "Invalid period. Must be one of 'day', 'week', 'month', 'year'."
+            )
+        self.group_by_attr = period
+        return self
+
+    def _group_by_period(self):
+        if self.group_by_attr == "day":
+            return func.date(self.transaction_type.date)
+        elif self.group_by_attr == "week":
+            return func.strftime("%Y-%W", self.transaction_type.date)
+        elif self.group_by_attr == "month":
+            return func.strftime("%Y-%m", self.transaction_type.date)
+        elif self.group_by_attr == "year":
+            return func.strftime("%Y", self.transaction_type.date)
+        else:
+            return None
+
+    def get_transactions_with_no_category(self):
+        categories = Category.get_all_categories()
+
+        for category in categories:
+            category = Category(category)
+            self.filter_description(description_contains=category, invert=True)
+        return self.transactions()
+
+
+def to_dict(obj):
+    # Convert an SQLAlchemy object to a dictionary
+    # Exclude the id column
+    return {c.key: getattr(obj, c.key) for c in obj.__table__.columns if c.key != "id"}
 
 
 def main() -> None:
