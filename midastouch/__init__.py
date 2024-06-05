@@ -1,1 +1,1 @@
-from .accounts import Category, CreditAccount, DebitAccount
+from .accounts import CategoryManager, CreditAccount, DebitAccount, category

@@ -7,6 +7,7 @@ from typing import Optional, Self, Union
 
 import pandas as pd
 import yaml
+from anytree import Node, RenderTree
 from platformdirs import user_data_dir
 from sqlalchemy import DateTime, Float, String, and_, create_engine, func, or_
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
@@ -127,174 +128,140 @@ class CreditTransaction(Base):
         return rep
 
 
-class Category:
-    def __init__(self, name):
-        # get the path to the YAML file (in the midastouch application directory)
-        directory = user_data_dir("bankdata", roaming=True, ensure_exists=True)
-        self.yaml_file_path = directory + "/categories.yml"
+class CategoryManager:
+    def __init__(self):
+        self.directory = user_data_dir("midastouch", roaming=True, ensure_exists=True)
+        self.yaml_file_path = os.path.join(self.directory, "categories.yml")
 
-        # if the YAML file does not exist, create it with empty dict
         if not os.path.exists(self.yaml_file_path):
             with open(self.yaml_file_path, "w") as yaml_file:
                 yaml.dump({}, yaml_file)
 
-        # load the categories from the YAML file and set them as attributes
         with open(self.yaml_file_path, "r") as yaml_file:
-            categories = yaml.safe_load(yaml_file)
-        self.name = name
+            self.categories = yaml.safe_load(yaml_file) or {}
 
-        try:
-            self.keywords = categories[name]
-            if len(self.keywords) == 0:
-                print(
-                    f"Category '{name}' has no keywords. Add keywords using the add_keywords method."
+    def save(self):
+        with open(self.yaml_file_path, "w") as yaml_file:
+            yaml.dump(self.categories, yaml_file)
+
+    def _find_category(self, name, category=None, path=""):
+        if category is None:
+            category = self.categories
+
+        if name in category:
+            return category, path + name
+
+        for subcat, subcat_content in category.items():
+            if isinstance(subcat_content, dict):
+                found_category, found_path = self._find_category(
+                    name, subcat_content, path + subcat + "/"
                 )
-        except KeyError:
-            # if the category does not exist, create it with an empty list of keywords
-            categories[name] = []
-            with open(self.yaml_file_path, "w") as yaml_file:
-                yaml.dump(categories, yaml_file)
-            self.keywords = []
-            # warn the user that new category was created and that they should add keywords
-            print(
-                f"Created new category '{name}'. Add keywords using the add_keywords method."
+                if found_category:
+                    return found_category, found_path
+        return None, None
+
+    def add_category(self, name, parent_name=None, keywords=None):
+        keywords = keywords or []
+        if parent_name:
+            parent_category, parent_path = self._find_category(parent_name)
+            if parent_category is None:
+                print(f"Parent category {parent_name} does not exist.")
+                return
+            parent_category[parent_name][name] = {"_keywords": keywords}
+        else:
+            self.categories[name] = {"_keywords": keywords}
+        self.save()
+
+    def remove_category(self, name):
+        category, path = self._find_category(name)
+        if category and name in category:
+            del category[name]
+            self.save()
+        else:
+            print(f"Category {name} does not exist.")
+
+    def move_category(self, name, new_parent_name):
+        category, path = self._find_category(name)
+        if category and name in category:
+            new_parent_category, new_parent_path = self._find_category(new_parent_name)
+            if new_parent_category:
+                new_parent_category[new_parent_name][name] = category.pop(name)
+                self.save()
+            else:
+                print(f"Parent category {new_parent_name} does not exist.")
+        else:
+            print(f"Category {name} does not exist.")
+
+    def add_keywords(self, name, keywords):
+        category, path = self._find_category(name)
+        if category and name in category:
+            if isinstance(keywords, str):
+                keywords = [keywords]
+            # Add new keywords to the category if they don't already exist
+            category[name]["_keywords"] = list(
+                set(category[name]["_keywords"] + keywords)
             )
+            self.save()
+        else:
+            print(f"Category {name} does not exist.")
 
-    def add_keywords(self, keywords: list[str] = [], sub_categories: list[str] = []):
-        """
-        Add keywords to a category.
+    def remove_keywords(self, name, keywords):
+        category, path = self._find_category(name)
+        if category and name in category:
+            category[name]["_keywords"] = [
+                kw for kw in category[name]["_keywords"] if kw not in keywords
+            ]
+            self.save()
+        else:
+            print(f"Category {name} does not exist.")
 
-        Parameters
-        ----------
-        keywords : list[str]
-            A list of keywords to add to the category.
-        sub_categories : list[str]
-            If the current category is a parent category, you can specify subcategories which will be included in the parent category.
-        """
-        keywords_to_add = []
-        with open(self.yaml_file_path, "r") as yaml_file:
-            available_categories = yaml.safe_load(yaml_file)
+    def rename_category(self, old_name, new_name):
+        category, path = self._find_category(old_name)
+        if category and old_name in category:
+            category[new_name] = category.pop(old_name)
+            self.save()
+        else:
+            print(f"Category {old_name} does not exist.")
 
-        # Add new keywords to the category
-        for keyword in keywords:
-            if keyword not in self.keywords:
-                keywords_to_add.append(keyword)
+    def get_all_categories(self):
+        return self.categories
 
-        # Add keywords from subcategories to the parent category
-        for sub_category in sub_categories:
-            if sub_category not in available_categories.keys():
-                available = ", ".join(available_categories.keys())
-                raise KeyError(
-                    f"Category {sub_category} does not exist. Available categories: {available}"
-                )
-            if sub_category == self.name:
-                available = ", ".join(available_categories.keys())
-                raise ValueError(
-                    f"Cannot add {self.name} category to itself. Available categories: {available}"
-                )
-            sub_category_keywords = available_categories[sub_category]
-            for keyword in sub_category_keywords:
-                if keyword not in self.keywords:
-                    keywords_to_add.append(keyword)
+    def _build_tree(self, name, parent, category, show_keywords):
+        if show_keywords and "_keywords" in category:
+            keywords_str = ", ".join(category["_keywords"])
+            node_name = f"{name} (Keywords: {keywords_str})"
+        else:
+            node_name = name
+        node = Node(node_name, parent=parent)
+        for subcat, subcat_content in category.items():
+            if subcat != "_keywords":
+                self._build_tree(subcat, node, subcat_content, show_keywords)
+        return node
 
-        # Add new keywords to the category
-        self.keywords.extend(keywords_to_add)
+    def visualize_categories(self, show_keywords=False):
+        root = Node("Categories")
+        for name, content in self.categories.items():
+            self._build_tree(name, root, content, show_keywords)
+        for pre, fill, node in RenderTree(root):
+            print("%s%s" % (pre, node.name))
 
-        # Update the YAML file by adding the new keywords to the category
-        try:
-            available_categories[self.name] = (
-                available_categories[self.name] + keywords_to_add
-            )
-        except KeyError:
-            available_categories[self.name] = keywords_to_add
+    def _get_keywords_recursive(self, category):
+        keywords = category.get("_keywords", [])
+        for subcat, subcat_content in category.items():
+            if isinstance(subcat_content, dict):
+                keywords.extend(self._get_keywords_recursive(subcat_content))
+        return keywords
 
-        with open(self.yaml_file_path, "w") as yaml_file:
-            yaml.dump(available_categories, yaml_file)
-
-    def remove_keywords(self, keywords: list[str] = [], sub_categories: list[str] = []):
-        """
-        Remove keywords from a category.
-
-        Parameters
-        ----------
-        keywords : list[str]
-            A list of keywords to remove from the category.
-        sub_categories : list[str]
-            If the current category is a parent category, you can specify subcategories which will be removed from the parent category.
-        """
-        keywords_to_remove = []
-        with open(self.yaml_file_path, "r") as yaml_file:
-            available_categories = yaml.safe_load(yaml_file)
-
-        # Remove keywords from the category
-        for keyword in keywords:
-            if keyword in self.keywords:
-                keywords_to_remove.append(keyword)
-
-        # Remove keywords from subcategories from the parent category
-        for sub_category in sub_categories:
-            if sub_category not in available_categories.keys():
-                available = ", ".join(available_categories.keys())
-                raise KeyError(
-                    f"Category {sub_category} does not exist. Available categories: {available}"
-                )
-            if sub_category == self.name:
-                available = ", ".join(available_categories.keys())
-                raise ValueError(
-                    f"Cannot remove {self.name} category from itself. Available categories: {available}"
-                )
-            sub_category_keywords = available_categories[sub_category]
-            for keyword in sub_category_keywords:
-                if keyword in self.keywords:
-                    keywords_to_remove.append(keyword)
-
-        # Remove keywords from the category
-        for keyword in keywords_to_remove:
-            self.keywords.remove(keyword)
-
-        # Update the YAML file by removing the keywords from the category
-        available_categories[self.name] = [
-            keyword
-            for keyword in available_categories[self.name]
-            if keyword not in keywords_to_remove
-        ]
-
-        with open(self.yaml_file_path, "w") as yaml_file:
-            yaml.dump(available_categories, yaml_file)
-
-    def delete_category(self):
-        """
-        Delete the category from memory.
-        """
-        with open(self.yaml_file_path, "r") as yaml_file:
-            available_categories = yaml.safe_load(yaml_file)
-        try:
-            del available_categories[self.name]
-        except KeyError:
-            print(f"Category {self.name} does not exist.")
-            return
-        with open(self.yaml_file_path, "w") as yaml_file:
-            yaml.dump(available_categories, yaml_file)
-        del self.keywords
-        del self.name
-        del self.yaml_file_path
-        del self
-
-    @classmethod
-    def get_all_categories(cls):
-        """
-        Get all category names.
-
-        Returns
-        -------
-        list[str]
-            A list of all category names.
-        """
-        directory = user_data_dir("bankdata", roaming=True, ensure_exists=True)
-        yaml_file_path = directory + "/categories.yml"
-        with open(yaml_file_path, "r") as yaml_file:
-            available_categories = yaml.safe_load(yaml_file)
-        return list(available_categories.keys())
+    def get_keywords(self, name, include_subcategories=True):
+        category, path = self._find_category(name)
+        if category and name in category:
+            if include_subcategories:
+                return self._get_keywords_recursive(category[name])
+            else:
+                return category[name].get("_keywords", [])
+        else:
+            print(f"Category {name} does not exist.")
+            return []
 
 
 class DebitAccount:
@@ -308,7 +275,7 @@ class DebitAccount:
             The name of the account. Used to create and/or access the database file.
         """
         self.name = name
-        directory = user_data_dir("bankdata", roaming=True, ensure_exists=True)
+        directory = user_data_dir("midastouch", roaming=True, ensure_exists=True)
         debit_dir = Path(directory) / "debit"
         debit_dir.mkdir(exist_ok=True)
         db_path = debit_dir / f"{name}.db"
@@ -335,7 +302,7 @@ class DebitAccount:
         list[str]
             A list of the names of all accounts in the database.
         """
-        directory = user_data_dir("bankdata", roaming=True, ensure_exists=True)
+        directory = user_data_dir("midastouch", roaming=True, ensure_exists=True)
         debit_dir = Path(directory) / "debit"
         debit_dir.mkdir(exist_ok=True)
         db_files = Path(directory).glob("debit/*.db")
@@ -351,7 +318,7 @@ class DebitAccount:
         name : str
             The name of the account to delete.
         """
-        directory = user_data_dir("bankdata", roaming=True, ensure_exists=True)
+        directory = user_data_dir("midastouch", roaming=True, ensure_exists=True)
         debit_dir = Path(directory) / "debit"
         debit_dir.mkdir(exist_ok=True)
         db_path = debit_dir / f"{name}.db"
@@ -515,7 +482,7 @@ class DebitAccount:
         float
             The current balance of the account.
         """
-        first_transaction = self.get_transactions()[-1]
+        first_transaction = self.query().transactions(as_list=True, ascending=False)[0]
         if first_transaction is None:
             raise ValueError("No transactions found")
         return first_transaction.balance
@@ -529,11 +496,12 @@ class DebitAccount:
         bool
             True if the transactions are valid, False otherwise.
         """
-        if self.count_transactions() == 0:
+        queryer = self.query()
+        if queryer.count() == 0:
             print("This account has no transactions.")
             return True
-        total_transactions = round(self.sum_transactions(), 2)
-        first_transaction = self.get_transactions()[0]
+        total_transactions = round(queryer.sum(), 2)
+        first_transaction = queryer.transactions(as_list=True, ascending=True)[0]
         # first balance is actually the balance AFTER the first transaction, so we need to remove the first transaction amount
         if first_transaction.deposit is not None:
             first_balance = first_transaction.balance - first_transaction.deposit
@@ -576,7 +544,7 @@ class CreditAccount:
             The name of the account. Used to create and/or access the database file.
         """
         self.name = name
-        directory = user_data_dir("bankdata", roaming=True, ensure_exists=True)
+        directory = user_data_dir("midastouch", roaming=True, ensure_exists=True)
         credit_dir = Path(directory) / "credit"
         credit_dir.mkdir(exist_ok=True)
         db_path = credit_dir / f"{name}.db"
@@ -602,7 +570,7 @@ class CreditAccount:
         list[str]
             A list of the names of all accounts in the database.
         """
-        directory = user_data_dir("bankdata", roaming=True, ensure_exists=True)
+        directory = user_data_dir("midastouch", roaming=True, ensure_exists=True)
         db_files = Path(directory).glob("*.db")
         return [file.stem for file in db_files]
 
@@ -616,7 +584,7 @@ class CreditAccount:
         name : str
             The name of the account to delete.
         """
-        directory = user_data_dir("bankdata", roaming=True, ensure_exists=True)
+        directory = user_data_dir("midastouch", roaming=True, ensure_exists=True)
         db_path = Path(directory) / f"{name}.db"
         # Check if account exists
         if not db_path.exists():
@@ -755,10 +723,12 @@ class CreditAccount:
         float
             The current balance of the account.
         """
-        first_transaction = self.get_transactions()[-1]
-        if first_transaction is None:
+        most_recent_transaction = self.query().transactions(
+            as_list=True,
+        )[-1]
+        if most_recent_transaction is None:
             raise ValueError("No transactions found")
-        return first_transaction.balance
+        return most_recent_transaction.balance
 
     def check_validity(self):
         """
@@ -769,8 +739,8 @@ class CreditAccount:
         bool
             True if the transactions are valid, False otherwise.
         """
-        total_transactions = round(self.sum_transactions(), 2)
-        first_transaction = self.get_transactions()[0]
+        total_transactions = round(self.query().sum(), 2)
+        first_transaction = self.query().transactions(as_list=True)[0]
         # first balance is actually the balance AFTER the first transaction, so we need to remove the first transaction amount
         if first_transaction.charge is not None:
             first_balance = first_transaction.balance - first_transaction.charge
@@ -780,7 +750,6 @@ class CreditAccount:
 
         diff_balance = round(last_balance - first_balance, 2)
 
-        # check if differences are equal
         return total_transactions == diff_balance
 
     def close_session(self):
@@ -873,7 +842,7 @@ class TransactionQuery:
 
     def filter_description(
         self,
-        description_contains: Optional[Union[str, list[str], Category]] = None,
+        description_contains: Optional[Union[str, list[str]]] = None,
         invert: bool = False,
     ):
         if description_contains is not None:
@@ -907,28 +876,10 @@ class TransactionQuery:
                             ]
                         )
                     )
-            elif isinstance(description_contains, Category):
-                if len(description_contains.keywords) == 0:
-                    # if the category has no keywords, return an empty list
-                    return self
-                if invert:
-                    self.query = self.query.filter(
-                        ~or_(
-                            *[
-                                self.transaction_type.description.contains(keyword)
-                                for keyword in description_contains.keywords
-                            ]
-                        )
-                    )
-                else:
-                    self.query = self.query.filter(
-                        or_(
-                            *[
-                                self.transaction_type.description.contains(keyword)
-                                for keyword in description_contains.keywords
-                            ]
-                        )
-                    )
+            else:
+                raise ValueError(
+                    "description_contains must be a string or a list of strings. Use the output of the categories(name: str) function to filter by categories."
+                )
         return self
 
     def filter_amount(
@@ -1088,7 +1039,9 @@ class TransactionQuery:
                     .group_by(period)
                     .all()
                 )
-                df = pd.DataFrame(result, columns=["period", "deposit_sum", "withdrawal_sum"])
+                df = pd.DataFrame(
+                    result, columns=["period", "deposit_sum", "withdrawal_sum"]
+                )
                 df["sum"] = df["deposit_sum"] - df["withdrawal_sum"]
                 df.drop(columns=["deposit_sum", "withdrawal_sum"], inplace=True)
             elif self.transaction_type == CreditTransaction:
@@ -1105,8 +1058,10 @@ class TransactionQuery:
                     .group_by(period)
                     .all()
                 )
-                df = pd.DataFrame(result, columns=["period", "charge_sum", "payment_sum"])
-                df["sum"] = df["payment_sum"] - df["charge_sum"]
+                df = pd.DataFrame(
+                    result, columns=["period", "charge_sum", "payment_sum"]
+                )
+                df["sum"] = df["charge_sum"] - df["payment_sum"]
                 df.drop(columns=["charge_sum", "payment_sum"], inplace=True)
 
             if order_by_sum:
@@ -1122,85 +1077,15 @@ class TransactionQuery:
                 func.coalesce(func.sum(DebitTransaction.deposit), 0),
                 func.coalesce(func.sum(DebitTransaction.withdrawal), 0),
             ).one()
+            total = round((deposit or 0) - (withdrawal or 0), 2)
         elif self.transaction_type == CreditTransaction:
-            withdrawal, deposit = self.query.with_entities(
+            charge, payment = self.query.with_entities(
                 func.coalesce(func.sum(CreditTransaction.charge), 0),
                 func.coalesce(func.sum(CreditTransaction.payment), 0),
             ).one()
+            total = round((charge or 0) - (payment or 0), 2)
 
-        return round((deposit or 0) - (withdrawal or 0), 2)
-
-    
-    def sum2(
-        self,
-        order_by_sum: bool = False,
-        ascending: bool = True,
-    ) -> float | pd.DataFrame:
-        if self.group_by_attr:
-            period = self._group_by_period()
-            if self.transaction_type == DebitTransaction:
-                result = (
-                    self.query.with_entities(
-                        period.label("period"),
-                        func.coalesce(func.sum(DebitTransaction.deposit), 0).label(
-                            "deposit_sum"
-                        ),
-                        func.coalesce(func.sum(DebitTransaction.withdrawal), 0).label(
-                            "withdrawal_sum"
-                        ),
-                    )
-                    .group_by(period)
-                    .all()
-                )
-            elif self.transaction_type == CreditTransaction:
-                result = (
-                    self.query.with_entities(
-                        period.label("period"),
-                        func.coalesce(func.sum(CreditTransaction.charge), 0).label(
-                            "charge_sum"
-                        ),
-                        func.coalesce(func.sum(CreditTransaction.payment), 0).label(
-                            "payment_sum"
-                        ),
-                    )
-                    .group_by(period)
-                    .all()
-                )
-
-            df = pd.DataFrame(
-                result, columns=["period", "deposit_sum", "withdrawal_sum"]
-            )
-            if self.transaction_type == CreditTransaction:
-                df.rename(
-                    columns={
-                        "deposit_sum": "charge_sum",
-                        "withdrawal_sum": "payment_sum",
-                    },
-                    inplace=True,
-                )
-            df["sum"] = df["deposit_sum"] - df["withdrawal_sum"]
-            df.drop(columns=["deposit_sum", "withdrawal_sum"], inplace=True)
-
-            if order_by_sum:
-                df.sort_values(by="sum", ascending=ascending, inplace=True)
-            else:
-                df.sort_values(by="period", ascending=ascending, inplace=True)
-
-            df.reset_index(drop=True, inplace=True)
-            return df
-
-        if self.transaction_type == DebitTransaction:
-            deposit, withdrawal = self.query.with_entities(
-                func.coalesce(func.sum(DebitTransaction.deposit), 0),
-                func.coalesce(func.sum(DebitTransaction.withdrawal), 0),
-            ).one()
-        elif self.transaction_type == CreditTransaction:
-            deposit, withdrawal = self.query.with_entities(
-                func.coalesce(func.sum(CreditTransaction.charge), 0),
-                func.coalesce(func.sum(CreditTransaction.payment), 0),
-            ).one()
-
-        return round((deposit or 0) - (withdrawal or 0), 2)
+        return total
 
     def average(self) -> float | pd.DataFrame:
         if self.group_by_attr:
@@ -1245,50 +1130,20 @@ class TransactionQuery:
             return None
 
     def get_transactions_with_no_category(self):
-        categories = Category.get_all_categories()
+        categories = CategoryManager().get_all_categories()
 
-        for category in categories:
-            category = Category(category)
-            self.filter_description(description_contains=category, invert=True)
+        for cat in categories:
+            cat = category(cat)
+            self.filter_description(description_contains=cat, invert=True)
         return self.transactions()
+
+
+def category(name: str):
+    cat = CategoryManager()
+    return cat.get_keywords(name)
 
 
 def to_dict(obj):
     # Convert an SQLAlchemy object to a dictionary
     # Exclude the id column
     return {c.key: getattr(obj, c.key) for c in obj.__table__.columns if c.key != "id"}
-
-
-def main() -> None:
-    # Create a debit account. Use create=True to create a new account.
-    # and remove create argument (or set to False) to access an existing account.
-    example_account = DebitAccount("example", create=False)
-
-    # Add transaction data from a CSV file. If data is already in the database, it will not be added again.
-    example_account.add_data("data/example.csv")
-
-    # Check if the transactions in the database are valid
-    print(f"Validity check passed: {example_account.check_validity()}")
-
-    # Get sum of all withdrawals in february 2023
-    sum_withdrawals = example_account.sum_transactions(
-        deposits=False, withdrawals=True, date_start="2023-02-01", date_end="2023-02-28"
-    )
-    print(f"Sum of all withdrawals in February 2023: {sum_withdrawals}")
-
-    # Get average deposit amount
-    average_deposit = example_account.average_transactions(
-        deposits=True, withdrawals=False
-    )
-    print(f"Average deposit amount: {average_deposit}")
-
-    # Get number of transactions with the string "13" in the description
-    count_transactions = example_account.count_transactions(description_contains="13")
-    print(f"Number of transactions with '13' in the description: {count_transactions}")
-
-    # Get all transactions
-    transactions = example_account.get_transactions()
-
-
-if __name__ == "__main__":
-    main()
