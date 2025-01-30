@@ -362,6 +362,8 @@ class DebitAccount:
         balance : float
             The balance after the transaction.
         """
+        # Make sure accent errors are not present
+        description = description.replace("Ã©", "e")
         id = generate_hash_id(
             description=description,
             date=date,
@@ -482,10 +484,10 @@ class DebitAccount:
         float
             The current balance of the account.
         """
-        first_transaction = self.query().transactions(as_list=True, ascending=False)[0]
-        if first_transaction is None:
+        latest_transaction = self.query().transactions(as_list=True)[-1]
+        if latest_transaction is None:
             raise ValueError("No transactions found")
-        return first_transaction.balance
+        return latest_transaction.balance
 
     def check_validity(self):
         """
@@ -512,6 +514,86 @@ class DebitAccount:
         diff_balance = round(last_balance - first_balance, 2)
 
         # check if differences are equal
+        print(f"First balance: {first_balance}")
+        print(f"Last balance: {last_balance}")
+        print(f"Total transactions: {total_transactions}")
+        print(f"Difference in balance: {diff_balance}")
+        print(total_transactions == diff_balance)
+        return total_transactions == diff_balance
+
+    def clean_data(self):
+        """
+        Find possible duplicates in the database and ask the user which ones to remove if any.
+        """
+        queryer = self.query()
+        transactions = queryer.transactions(as_list=True)
+        duplicates = []
+        # A match is found if date, balance, deposit, and withdrawal are the same. Description can be different.
+        for i, txn1 in enumerate(transactions):
+            for j, txn2 in enumerate(transactions):
+                if i != j and txn1.date == txn2.date and txn1.balance == txn2.balance:
+                    if (
+                        txn1.deposit == txn2.deposit
+                        and txn1.withdrawal == txn2.withdrawal
+                    ):
+                        if (i, j) not in duplicates and (j, i) not in duplicates:
+                            duplicates.append((i, j))
+                            break
+        if duplicates:
+            print("Possible duplicates found:")
+            for i, j in duplicates:
+                print(f"Transaction {i}: {transactions[i]}")
+                print(f"Transaction {j}: {transactions[j]}")
+                print()
+            if input("Do you want to remove duplicates? (y/n): ").lower() == "y":
+                to_remove = input("Enter the indices of the transactions you want to remove (separated by a comma): ")
+                to_remove = [int(i) for i in to_remove.split(",")]
+                for i in to_remove:
+                    self.session.delete(transactions[i])
+                self.session.commit()
+                print("Duplicates removed.")
+                
+    
+    def check_validity_in_range(self, date_start, date_end):
+        """
+        Check if the transactions in the database are valid within a specified date range.
+
+        Parameters
+        ----------
+        date_start : datetime
+            The start date of the date range.
+        date_end : datetime
+            The end date of the date range.
+
+        Returns
+        -------
+        bool
+            True if the transactions are valid, False otherwise.
+        """
+        queryer = self.query()
+        if queryer.count() == 0:
+            print("This account has no transactions.")
+            return True
+        total_transactions = round(
+            queryer.filter_date_range(date_start, date_end).sum(), 2
+        )
+        first_transaction = queryer.transactions(as_list=True, ascending=True)[0]
+        # first balance is actually the balance AFTER the first transaction, so we need to remove the first transaction amount
+        if first_transaction.deposit is not None:
+            first_balance = first_transaction.balance - first_transaction.deposit
+        else:
+            first_balance = first_transaction.balance + first_transaction.withdrawal
+        last_transaction = queryer.transactions(as_list=True, ascending=True)[-1]
+        last_balance = last_transaction.balance
+
+        diff_balance = round(last_balance - first_balance, 2)
+
+        # check if differences are equal
+        print(f"First balance: {first_balance}")
+        print(f"Last balance: {last_balance}")
+        print(f"Total transactions: {total_transactions}")
+        print(f"Difference in balance: {diff_balance}")
+        print(total_transactions == diff_balance)
         return total_transactions == diff_balance
 
     def close_session(self):
@@ -750,6 +832,7 @@ class CreditAccount:
 
         diff_balance = round(last_balance - first_balance, 2)
 
+        print(total_transactions == diff_balance)
         return total_transactions == diff_balance
 
     def close_session(self):
